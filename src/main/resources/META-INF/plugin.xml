@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<idea-plugin>
+    <id>com.predictivecoder.ayinamaerik.PredictiveCoder</id>
+    <name>PredictiveCoder</name>
+    <vendor email="ayinamaerik@gmail.com" url="http://maerik-online-cv.vercel.app">DigitalMorgram</vendor>
+
+    <description><![CDATA[
+        Intelligent code completion plugin using GPT-4o.<br>
+        Features:<br>
+        - Real-time code suggestions<br>
+        - Context-aware completions<br>
+        - Tab to accept full suggestion<br>
+        - Right arrow to accept single line<br>
+        - Customizable settings
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.java</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Services -->
+        <projectService serviceImplementation="com.predictivecoder.ayinamaerik.services.PredictiveCoderProjectService"/>
+        <projectService serviceImplementation="com.predictivecoder.ayinamaerik.services.BackgroundTaskService"/>
+        <projectService serviceImplementation="com.predictivecoder.ayinamaerik.services.SuggestionService"/>
+        <projectService serviceImplementation="com.predictivecoder.ayinamaerik.listeners.ProjectOpenCloseListener"/>
+
+        <!-- Application Level Services -->
+        <applicationService serviceImplementation="com.predictivecoder.ayinamaerik.services.OpenAIService"/>
+        <applicationService serviceImplementation="com.predictivecoder.ayinamaerik.services.SettingsService"/>
+        <applicationService serviceImplementation="com.predictivecoder.ayinamaerik.config.PredictiveCoderConfig"/>
+
+        <!-- Notifications -->
+        <notificationGroup id="PredictiveCoder Notifications"
+                           displayType="BALLOON"
+                           key="predictivecoder.notifications"/>
+
+        <!-- Settings -->
+        <applicationConfigurable
+                instance="com.predictivecoder.ayinamaerik.settings.PredictiveCoderConfigurable"
+                id="com.predictivecoder.ayinamaerik.settings.PredictiveCoderConfigurable"
+                displayName="PredictiveCoder"/>
+
+        <!-- Tool Window -->
+        <toolWindow
+                id="PredictiveCoder"
+                icon="/icons/predictivecoder.svg"
+                anchor="right"
+                factoryClass="com.predictivecoder.ayinamaerik.ui.PredictiveCoderToolWindow"
+                secondary="true"/>
+
+        <!-- Status Bar Widget -->
+        <statusBarWidgetFactory
+                id="PredictiveCoderStatus"
+                implementation="com.predictivecoder.ayinamaerik.ui.PredictiveCoderStatusBarWidgetFactory"/>
+    </extensions>
+
+    <projectListeners>
+        <listener
+                class="com.predictivecoder.ayinamaerik.listeners.ProjectOpenCloseListener"
+                topic="com.intellij.openapi.project.ProjectManagerListener"/>
+    </projectListeners>
+
+    <actions>
+        <!-- Configure API Key Action -->
+        <action id="PredictiveCoder.ConfigureApiKey"
+                class="com.predictivecoder.ayinamaerik.actions.ConfigureApiKeyAction"
+                text="Configure OpenAI API Key"
+                description="Configure your OpenAI API key">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+
+        <!-- Accept Full Suggestion Action -->
+        <action id="PredictiveCoder.AcceptFullSuggestion"
+                class="com.predictivecoder.ayinamaerik.listeners.AcceptFullSuggestionAction"
+                text="Accept Full Suggestion"
+                description="Accept the entire code suggestion">
+            <keyboard-shortcut keymap="$default" first-keystroke="TAB"/>
+            <add-to-group group-id="EditMenu" anchor="first"/>
+        </action>
+
+        <!-- Accept Line Suggestion Action -->
+        <action id="PredictiveCoder.AcceptLineSuggestion"
+                class="com.predictivecoder.ayinamaerik.listeners.AcceptLineSuggestionAction"
+                text="Accept Single Line"
+                description="Accept only the current line of the suggestion">
+            <keyboard-shortcut keymap="$default" first-keystroke="RIGHT"/>
+            <add-to-group group-id="EditMenu" anchor="after" relative-to-action="PredictiveCoder.AcceptFullSuggestion"/>
+        </action>
+
+        <!-- Toggle Completion Action -->
+        <action id="PredictiveCoder.ToggleCompletion"
+                class="com.predictivecoder.ayinamaerik.listeners.ToggleCompletionAction"
+                text="Toggle PredictiveCoder"
+                description="Toggle automatic code completion">
+            <keyboard-shortcut keymap="$default" first-keystroke="meta shift P"/>
+            <add-to-group group-id="EditMenu" anchor="after" relative-to-action="PredictiveCoder.AcceptLineSuggestion"/>
+        </action>
+    </actions>
+</idea-plugin>
