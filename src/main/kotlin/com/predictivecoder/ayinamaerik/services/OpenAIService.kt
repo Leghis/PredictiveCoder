@@ -21,7 +21,7 @@ import java.util.LinkedHashMap
 class OpenAIService {
     private val logger = Logger.getInstance(OpenAIService::class.java)
     private val baseUrl = "https://api.openai.com/v1/chat/completions"
-    private val model = "gpt-4o"
+    private val model = "gpt-4o-mini"
 
     private val suggestionCache = object : LinkedHashMap<String, CacheEntry>(100, 0.75f, true) {
         override fun removeEldestEntry(eldest: Map.Entry<String, CacheEntry>): Boolean {
@@ -68,7 +68,7 @@ class OpenAIService {
             val testRequest = CompletionRequest(
                 model = model,
                 messages = listOf(Message("user", "Say 'test'")),
-                temperature = 0.1,
+                temperature = 0.4,
                 max_tokens = 5,
                 top_p = 1.0,
                 frequency_penalty = 0.0,
@@ -178,8 +178,8 @@ class OpenAIService {
             val request = CompletionRequest(
                 model = model,
                 messages = messages,
-                temperature = if (isNewLine) 0.1 else 0.1,
-                max_tokens = if (isNewLine) 4000 else 4000,
+                temperature = if (isNewLine) 0.4 else 0.4,
+                max_tokens = if (isNewLine) 50 else 50,
                 top_p = 1.0,
                 frequency_penalty = if (isNewLine) 0.2 else 0.0,
                 presence_penalty = if (isNewLine) 0.2 else 0.0,
@@ -221,6 +221,31 @@ class OpenAIService {
         }
     }
 
+    private suspend fun processResponse(responseBody: String): List<String> = withContext(Dispatchers.Default) {
+        try {
+            val jsonResponse = gson.fromJson(responseBody, JsonObject::class.java)
+            jsonResponse.getAsJsonArray("choices")?.mapNotNull { choice ->
+                choice.asJsonObject
+                    .getAsJsonObject("message")
+                    ?.get("content")
+                    ?.asString
+                    ?.let { cleanSuggestion(it) }
+                    ?.takeIf { it.isNotBlank() && !it.contains("```") }
+            } ?: emptyList()
+        } catch (e: Exception) {
+            logger.error("Error processing response: ${e.message}")
+            emptyList()
+        }
+    }
+
+    private fun cleanSuggestion(suggestion: String): String {
+        return suggestion
+            .replace(Regex("```\\w*\\n?"), "")
+            .replace(Regex("\\s+$"), "")
+            .trim()
+            .let { if (it.startsWith(".")) it.substring(1) else it }
+    }
+
     private fun buildSystemPrompt(fileType: String, isNewLine: Boolean): String {
         return buildString {
             appendLine("You are a code completion assistant for $fileType files.")
@@ -249,31 +274,6 @@ class OpenAIService {
                 appendLine("- Maintain logical flow with surrounding code")
             }
         }
-    }
-
-    private suspend fun processResponse(responseBody: String): List<String> = withContext(Dispatchers.Default) {
-        try {
-            val jsonResponse = gson.fromJson(responseBody, JsonObject::class.java)
-            jsonResponse.getAsJsonArray("choices")?.mapNotNull { choice ->
-                choice.asJsonObject
-                    .getAsJsonObject("message")
-                    ?.get("content")
-                    ?.asString
-                    ?.let { cleanSuggestion(it) }
-                    ?.takeIf { it.isNotBlank() && !it.contains("```") }
-            } ?: emptyList()
-        } catch (e: Exception) {
-            logger.error("Error processing response: ${e.message}")
-            emptyList()
-        }
-    }
-
-    private fun cleanSuggestion(suggestion: String): String {
-        return suggestion
-            .replace(Regex("```\\w*\\n?"), "")
-            .replace(Regex("\\s+$"), "")
-            .trim()
-            .let { if (it.startsWith(".")) it.substring(1) else it }
     }
 
     companion object {

@@ -33,7 +33,7 @@ class EditorListener(private val project: Project) : DocumentListener, CaretList
     private var currentJob: Job? = null
     private var lastProcessedText = ""
     private var lastProcessedLine = -1
-    private val debounceDelay = 100L // Réduit pour plus de réactivité
+    private val debounceDelay = 100L
 
     override fun documentChanged(event: DocumentEvent) {
         if (!settings.isEnabled || !settings.autoSuggestEnabled) return
@@ -44,7 +44,6 @@ class EditorListener(private val project: Project) : DocumentListener, CaretList
         val isBackspace = newText.isEmpty() && oldText == "\n"
 
         if (isNewLine || isBackspace) {
-            // Traitement immédiat pour les sauts de ligne
             processChange(event.document, true)
         } else {
             processChange(event.document, false)
@@ -71,7 +70,6 @@ class EditorListener(private val project: Project) : DocumentListener, CaretList
 
         currentJob = launch {
             try {
-                // Délai réduit pour les nouvelles lignes
                 delay(if (isNewLine) 50L else debounceDelay)
 
                 val editorAndOffset = withContext(Dispatchers.Default) {
@@ -88,7 +86,6 @@ class EditorListener(private val project: Project) : DocumentListener, CaretList
                             val lineStart = document.getLineStartOffset(lineNumber)
                             val lineEnd = document.getLineEndOffset(lineNumber)
 
-                            // Vérifier si le curseur est à la fin de la ligne ou si c'est une nouvelle ligne
                             if (offset == lineEnd || isNewLine) {
                                 val currentLine = document.getText(TextRange(lineStart, offset))
                                 result = Triple(editor, offset, currentLine)
@@ -142,49 +139,99 @@ class EditorListener(private val project: Project) : DocumentListener, CaretList
         return ApplicationManager.getApplication().runReadAction<String> {
             buildString {
                 val lineNumber = document.getLineNumber(offset)
+                val totalLines = document.lineCount
 
-                // Ajouter des métadonnées utiles
+                // Métadonnées de base
                 appendLine("// FileType: ${fileType.name}")
                 appendLine("// Current line number: $lineNumber")
+                appendLine("// Total lines: $totalLines")
+
+                // Récupérer le contexte complet du fichier
+                val fileContent = document.text
+                val currentFilePackage = fileContent.substringBefore("\n\n")
+                if (currentFilePackage.startsWith("package ")) {
+                    appendLine(currentFilePackage)
+                    appendLine()
+                }
+
+                // Récupérer les imports
+                val imports = fileContent.lines()
+                    .filter { it.trim().startsWith("import ") }
+                if (imports.isNotEmpty()) {
+                    imports.forEach { appendLine(it) }
+                    appendLine()
+                }
 
                 // Analyser le bloc actuel
                 val blockInfo = analyzeCurrentBlock(document, lineNumber)
-                appendLine("// Block type: ${blockInfo.first}")
-                appendLine("// Indentation level: ${blockInfo.second}")
+                val (blockStart, blockEnd) = findBlockBoundaries(document, lineNumber, blockInfo.second)
 
-                // Contexte précédent enrichi
-                val startLine = maxOf(0, lineNumber - if (isNewLine) 15 else 8)
-                var previousIndentation = -1
-
-                for (i in startLine until lineNumber) {
+                // Contexte précédent
+                val contextStart = maxOf(0, blockStart - 10)
+                for (i in contextStart until lineNumber) {
                     val lineStart = document.getLineStartOffset(i)
                     val lineEnd = document.getLineEndOffset(i)
                     val lineText = document.getText(TextRange(lineStart, lineEnd))
 
-                    // Calculer l'indentation
-                    val currentIndentation = lineText.takeWhile { it.isWhitespace() }.length
-
-                    // Ajouter des marqueurs de structure
-                    if (currentIndentation != previousIndentation) {
-                        appendLine("// Indentation change: $currentIndentation")
-                        previousIndentation = currentIndentation
+                    if (i == blockStart) {
+                        appendLine("// Start of current block")
                     }
-
                     appendLine(lineText)
                 }
 
-                // Ligne courante avec son contexte
+                // Ligne courante
                 append(currentLine)
 
-                // Contexte suivant (réduit pour les nouvelles lignes)
-                val endLine = minOf(document.lineCount - 1, lineNumber + if (isNewLine) 1 else 3)
-                for (i in lineNumber + 1..endLine) {
+                // Contexte suivant
+                val contextEnd = minOf(totalLines - 1, blockEnd + 5)
+                for (i in (lineNumber + 1)..contextEnd) {
                     val lineStart = document.getLineStartOffset(i)
                     val lineEnd = document.getLineEndOffset(i)
-                    appendLine(document.getText(TextRange(lineStart, lineEnd)))
+                    val lineText = document.getText(TextRange(lineStart, lineEnd))
+                    appendLine(lineText)
+                    if (i == blockEnd) {
+                        appendLine("// End of current block")
+                    }
                 }
             }
         }
+    }
+
+    private fun findBlockBoundaries(
+        document: com.intellij.openapi.editor.Document,
+        currentLine: Int,
+        currentIndentation: Int
+    ): Pair<Int, Int> {
+        var start = currentLine
+        var end = currentLine
+
+        // Rechercher le début du bloc
+        for (i in currentLine downTo 0) {
+            val lineStart = document.getLineStartOffset(i)
+            val lineEnd = document.getLineEndOffset(i)
+            val lineText = document.getText(TextRange(lineStart, lineEnd))
+            val indentation = lineText.takeWhile { it.isWhitespace() }.length
+
+            if (indentation < currentIndentation) {
+                start = i
+                break
+            }
+        }
+
+        // Rechercher la fin du bloc
+        for (i in currentLine until document.lineCount) {
+            val lineStart = document.getLineStartOffset(i)
+            val lineEnd = document.getLineEndOffset(i)
+            val lineText = document.getText(TextRange(lineStart, lineEnd))
+            val indentation = lineText.takeWhile { it.isWhitespace() }.length
+
+            if (indentation < currentIndentation) {
+                end = i
+                break
+            }
+        }
+
+        return Pair(start, end)
     }
 
     private fun analyzeCurrentBlock(document: com.intellij.openapi.editor.Document, lineNumber: Int): Pair<String, Int> {
@@ -192,24 +239,29 @@ class EditorListener(private val project: Project) : DocumentListener, CaretList
         var indentationLevel = 0
 
         try {
-            val currentLine = document.getText(TextRange(
-                document.getLineStartOffset(lineNumber),
-                document.getLineEndOffset(lineNumber)
-            ))
+            val lineStart = document.getLineStartOffset(lineNumber)
+            val lineEnd = document.getLineEndOffset(lineNumber)
+            val currentLine = document.getText(TextRange(lineStart, lineEnd))
 
             indentationLevel = currentLine.takeWhile { it.isWhitespace() }.length
 
-            // Détecter le type de bloc
             blockType = when {
-                currentLine.trimStart().startsWith("if") -> "if-block"
-                currentLine.trimStart().startsWith("for") -> "for-loop"
-                currentLine.trimStart().startsWith("while") -> "while-loop"
-                currentLine.trimStart().startsWith("class") -> "class-definition"
-                currentLine.trimStart().startsWith("fun") -> "function-definition"
-                currentLine.trimStart().startsWith("val") -> "value-declaration"
-                currentLine.trimStart().startsWith("var") -> "variable-declaration"
+                currentLine.contains("class") -> "class-definition"
+                currentLine.contains("fun") -> "function-definition"
+                currentLine.contains("if") -> "if-block"
+                currentLine.contains("for") -> "for-loop"
+                currentLine.contains("while") -> "while-loop"
+                currentLine.contains("when") -> "when-expression"
+                currentLine.contains("try") -> "try-block"
+                currentLine.contains("catch") -> "catch-block"
+                currentLine.contains("do") -> "do-while-loop"
+                currentLine.contains("else") -> "else-block"
                 else -> "code-block"
             }
+
+            if (isInString(currentLine)) blockType = "string-content"
+            if (isInComment(currentLine)) blockType = "comment"
+
         } catch (e: Exception) {
             logger.error("Error analyzing block", e)
         }
@@ -217,9 +269,32 @@ class EditorListener(private val project: Project) : DocumentListener, CaretList
         return Pair(blockType, indentationLevel)
     }
 
+    private fun isInString(line: String): Boolean {
+        var inString = false
+        var escaped = false
+        for (char in line) {
+            when {
+                char == '\\' -> escaped = !escaped
+                char == '"' && !escaped -> inString = !inString
+                else -> escaped = false
+            }
+        }
+        return inString
+    }
+
+    private fun isInComment(line: String): Boolean {
+        val trimmedLine = line.trim()
+        return trimmedLine.startsWith("//") || trimmedLine.startsWith("/*") || trimmedLine.endsWith("*/")
+    }
+
     fun dispose() {
         currentJob?.cancel()
         job.cancel()
         contextCache.clear()
+    }
+
+    companion object {
+        private const val CONTEXT_LINES_BEFORE = 10
+        private const val CONTEXT_LINES_AFTER = 5
     }
 }
